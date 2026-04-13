@@ -1,0 +1,149 @@
+
+<h2 class="sr-only">Priority queue simulation: 7 users competing for 40 avatar generation slots across 5 dispatch cycles</h2>
+<div style="padding:1rem 0;font-family:var(--font-sans);">
+<div style="font-family:var(--font-mono);font-size:11.5px;color:var(--color-text-secondary);background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:0.75rem 1rem;margin-bottom:1.5rem;line-height:2.2;overflow-x:auto;white-space:nowrap;">
+  score = 50 &minus; (running&times;3) &minus; (waiting&times;1) + (wait_min&times;2) + retry(+5) + group(+8) + new_user(+15)
+</div>
+<div id="qa"></div>
+<script>
+const UC={A:'#7F77DD',B:'#378ADD',C:'#1D9E75',D:'#888780',E:'#BA7517',F:'#D85A30',G:'#D4537E'};
+const CY=[
+  {time:'10:15pm',slotsFreed:0,desc:'All 40 slots running — queue builds, no slots free yet',
+   note:'No dispatch yet. E leads despite only 2 running jobs — the retry flag (+5) makes the difference. A sits at the bottom: 15 running jobs = −45 penalty, which swamps the +30 from 15 min of waiting.',
+   users:[{id:'A',r:15,w:20,t:15,retry:false,grp:false},{id:'B',r:10,w:8,t:10,retry:false,grp:false},{id:'C',r:5,w:2,t:7,retry:false,grp:false},{id:'D',r:3,w:0,t:0,retry:false,grp:false},{id:'E',r:2,w:1,t:6,retry:true,grp:false},{id:'F',r:4,w:6,t:8,retry:false,grp:true},{id:'G',r:1,w:3,t:4,retry:false,grp:false}],
+   winners:[]},
+  {time:'10:15pm',slotsFreed:2,desc:'2 slots freed — first dispatch',
+   note:'E wins: the retry bonus (+5) pushes it just ahead of F. F wins: group cohesion (+8) reflects that this multi-scene export is already partially running, so the system keeps it moving. A has the lowest score despite the longest wait.',
+   users:[{id:'A',r:15,w:20,t:15,retry:false,grp:false},{id:'B',r:10,w:8,t:10,retry:false,grp:false},{id:'C',r:5,w:2,t:7,retry:false,grp:false},{id:'D',r:3,w:0,t:0,retry:false,grp:false},{id:'E',r:2,w:1,t:6,retry:true,grp:false},{id:'F',r:4,w:6,t:8,retry:false,grp:true},{id:'G',r:1,w:3,t:4,retry:false,grp:false}],
+   winners:['E','F']},
+  {time:'10:17pm',slotsFreed:3,desc:'3 slots freed — A and B had completions, E cleared its queue',
+   note:'Scores fully recalculated from current state. F still leads. G overtook C: fewer running jobs (−3 vs −15) beats 3 extra minutes of wait time. A climbed slightly (+4 from aging) but 13 running jobs is still a dominant penalty.',
+   users:[{id:'A',r:13,w:20,t:17,retry:false,grp:false},{id:'B',r:9,w:8,t:12,retry:false,grp:false},{id:'C',r:5,w:2,t:9,retry:false,grp:false},{id:'D',r:3,w:0,t:0,retry:false,grp:false},{id:'E',r:3,w:0,t:0,retry:false,grp:false},{id:'F',r:5,w:5,t:10,retry:false,grp:true},{id:'G',r:1,w:3,t:6,retry:false,grp:false}],
+   winners:['F','G','C']},
+  {time:'10:19pm',slotsFreed:2,desc:'2 more slots freed — queue narrowing',
+   note:'F and G continue to win. C is close but F\'s group bonus edges it out. A is now scoring 35 — slowly climbing. Wait time contribution (+38) is growing, but 11 running jobs (−33) keeps A near the bottom. Lighter users are still being served first.',
+   users:[{id:'A',r:11,w:20,t:19,retry:false,grp:false},{id:'B',r:8,w:8,t:14,retry:false,grp:false},{id:'C',r:6,w:1,t:11,retry:false,grp:false},{id:'D',r:3,w:0,t:0,retry:false,grp:false},{id:'E',r:3,w:0,t:0,retry:false,grp:false},{id:'F',r:6,w:4,t:12,retry:false,grp:true},{id:'G',r:2,w:2,t:8,retry:false,grp:false}],
+   winners:['F','G']},
+  {time:'10:25pm',slotsFreed:3,desc:"3 slots freed — A's original 15 jobs have all completed",
+   note:"A now has 0 running jobs. Two things happen simultaneously: the new_user bonus (+15) activates, and 25 min of accumulated wait time adds +50. Score jumps to 95 — highest in the queue. No special logic. The unified score formula self-corrected automatically.",
+   users:[{id:'A',r:0,w:20,t:25,retry:false,grp:false},{id:'B',r:3,w:5,t:20,retry:false,grp:false},{id:'C',r:2,w:0,t:0,retry:false,grp:false},{id:'D',r:1,w:0,t:0,retry:false,grp:false},{id:'E',r:1,w:0,t:0,retry:false,grp:false},{id:'F',r:3,w:2,t:20,retry:false,grp:true},{id:'G',r:1,w:0,t:0,retry:false,grp:false}],
+   winners:['A','F','B']}
+];
+
+function score(u){
+  if(!u.w)return null;
+  let s=50;
+  if(u.r>0)s-=u.r*3;
+  s-=u.w;
+  s+=u.t*2;
+  if(u.retry)s+=5;
+  if(u.grp)s+=8;
+  if(u.r===0)s+=15;
+  return s;
+}
+
+function bkdn(u){
+  if(!u.w)return '—';
+  const s=score(u);
+  const sc=s>=70?'var(--color-text-success)':s>=45?'var(--color-text-primary)':'var(--color-text-secondary)';
+  let p=['50'];
+  if(u.r>0)p.push(`&minus;(${u.r}&times;3)`);
+  p.push(`&minus;${u.w}`);
+  if(u.t>0)p.push(`+(${u.t}&times;2)`);
+  if(u.retry)p.push(`<span style="color:var(--color-text-warning)">+5</span>`);
+  if(u.grp)p.push(`<span style="color:var(--color-text-info)">+8</span>`);
+  if(u.r===0)p.push(`<span style="color:var(--color-text-success)">+15</span>`);
+  p.push(`= <b style="color:${sc};font-size:14px;">${s}</b>`);
+  return p.join(' ');
+}
+
+let cur=0;
+
+function render(){
+  const c=CY[cur];
+  const sorted=[...c.users].sort((a,b)=>(score(b)??-9999)-(score(a)??-9999));
+  const totalR=c.users.reduce((s,u)=>s+u.r,0);
+
+  let slots='';
+  for(let i=0;i<40;i++){
+    let bg,bdr='';
+    if(i<totalR-c.slotsFreed){bg='#378ADD';}
+    else if(i<totalR){bg='#1D9E75';}
+    else{bg='var(--color-background-secondary)';bdr=';border:0.5px solid var(--color-border-tertiary)';}
+    slots+=`<div style="width:13px;height:13px;border-radius:2px;background:${bg}${bdr};flex-shrink:0;"></div>`;
+  }
+
+  let rows='';
+  sorted.forEach(u=>{
+    const s=score(u);
+    const won=c.winners.includes(u.id);
+    const idle=!u.w;
+    let rs=idle?'opacity:0.38;':'';
+    if(won)rs='background:var(--color-background-success);';
+    let flags='';
+    if(u.retry)flags+=`<span style="font-size:11px;padding:2px 6px;border-radius:4px;background:var(--color-background-warning);color:var(--color-text-warning);font-weight:500;margin-right:3px;">retry</span>`;
+    if(u.grp)flags+=`<span style="font-size:11px;padding:2px 6px;border-radius:4px;background:var(--color-background-info);color:var(--color-text-info);font-weight:500;margin-right:3px;">group</span>`;
+    if(u.r===0&&u.w>0)flags+=`<span style="font-size:11px;padding:2px 6px;border-radius:4px;background:var(--color-background-success);color:var(--color-text-success);font-weight:500;">new</span>`;
+    const dot=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${UC[u.id]};margin-right:6px;vertical-align:middle;flex-shrink:0;"></span>`;
+    const tag=won?`<span style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--color-background-success);color:var(--color-text-success);font-weight:500;white-space:nowrap;">gets slot</span>`:'';
+    const td='padding:8px 10px;border-bottom:0.5px solid var(--color-border-tertiary);';
+    rows+=`<tr style="${rs}">
+      <td style="${td}font-weight:500;white-space:nowrap;">${dot}User ${u.id}</td>
+      <td style="${td}text-align:center;">${u.r}</td>
+      <td style="${td}text-align:center;">${u.w||'—'}</td>
+      <td style="${td}text-align:center;">${u.t>0?u.t+'m':'—'}</td>
+      <td style="${td}">${flags}</td>
+      <td style="${td}font-size:12px;font-family:var(--font-mono);color:var(--color-text-secondary);">${bkdn(u)}</td>
+      <td style="${td}">${tag}</td>
+    </tr>`;
+  });
+
+  let dispatch='';
+  if(!c.slotsFreed){
+    dispatch=`<p style="margin:0;font-size:13px;color:var(--color-text-secondary);line-height:1.6;">${c.note}</p>`;
+  } else {
+    const wn=c.winners.map(id=>`<b style="color:${UC[id]}">User ${id}</b>`).join(', ');
+    dispatch=`<div style="font-size:14px;margin-bottom:8px;">${c.slotsFreed} slot${c.slotsFreed>1?'s':''} awarded to ${wn}</div><p style="margin:0;font-size:13px;color:var(--color-text-secondary);line-height:1.6;">${c.note}</p>`;
+  }
+
+  const dots=CY.map((_,i)=>`<span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin:0 2px;background:${i===cur?'var(--color-text-primary)':'var(--color-border-secondary)'};transition:background 0.2s;"></span>`).join('');
+
+  document.getElementById('qa').innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.25rem;flex-wrap:wrap;">
+      <span style="background:var(--color-background-info);color:var(--color-text-info);font-size:12px;font-weight:500;padding:4px 12px;border-radius:var(--border-radius-md);white-space:nowrap;">Cycle ${cur+1} / ${CY.length}</span>
+      <span style="font-size:13px;color:var(--color-text-secondary);white-space:nowrap;">${c.time}</span>
+      <span style="font-size:13px;color:var(--color-text-primary);">${c.desc}</span>
+    </div>
+    <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:8px;">${slots}</div>
+    <div style="display:flex;gap:16px;margin-bottom:1.5rem;font-size:12px;color:var(--color-text-secondary);flex-wrap:wrap;">
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#378ADD;margin-right:4px;vertical-align:middle;"></span>running (${totalR-c.slotsFreed})</span>
+      ${c.slotsFreed>0?`<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#1D9E75;margin-right:4px;vertical-align:middle;"></span>freed (${c.slotsFreed})</span>`:''}
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);margin-right:4px;vertical-align:middle;"></span>open (${40-totalR})</span>
+    </div>
+    <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:580px;">
+      <thead><tr>
+        <th style="padding:8px 10px;border-bottom:0.5px solid var(--color-border-tertiary);text-align:left;font-size:12px;font-weight:500;color:var(--color-text-secondary);">User</th>
+        <th style="padding:8px 10px;border-bottom:0.5px solid var(--color-border-tertiary);text-align:center;font-size:12px;font-weight:500;color:var(--color-text-secondary);">Running</th>
+        <th style="padding:8px 10px;border-bottom:0.5px solid var(--color-border-tertiary);text-align:center;font-size:12px;font-weight:500;color:var(--color-text-secondary);">Waiting</th>
+        <th style="padding:8px 10px;border-bottom:0.5px solid var(--color-border-tertiary);text-align:center;font-size:12px;font-weight:500;color:var(--color-text-secondary);">Wait</th>
+        <th style="padding:8px 10px;border-bottom:0.5px solid var(--color-border-tertiary);text-align:left;font-size:12px;font-weight:500;color:var(--color-text-secondary);">Flags</th>
+        <th style="padding:8px 10px;border-bottom:0.5px solid var(--color-border-tertiary);text-align:left;font-size:12px;font-weight:500;color:var(--color-text-secondary);">Score breakdown</th>
+        <th style="padding:8px 10px;border-bottom:0.5px solid var(--color-border-tertiary);"></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    </div>
+    <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-lg);padding:1rem 1.25rem;margin:1.25rem 0;">${dispatch}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <button onclick="prevQ()" ${cur===0?'disabled':''}>← Previous</button>
+      <span>${dots}</span>
+      <button onclick="nextQ()" ${cur===CY.length-1?'disabled':''}>Next cycle →</button>
+    </div>
+  `;
+}
+function prevQ(){if(cur>0){cur--;render();}}
+function nextQ(){if(cur<CY.length-1){cur++;render();}}
+render();
+</script>
+</div>
